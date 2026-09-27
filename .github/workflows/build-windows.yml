@@ -1,0 +1,138 @@
+# ============================================================================
+#  Full Windows build - MANUAL, and self-hosted.
+#
+#  WHY SELF-HOSTED: a JDK build needs Cygwin64, a Boot JDK, the Windows SDK, and
+#  about 6 GB of scratch space, then runs for 20-40 minutes. GitHub-hosted
+#  windows runners have Visual Studio 2022 but not Cygwin, so a full build there
+#  would mean installing a POSIX layer, downloading a Boot JDK and blowing the
+#  6-hour bill on every push. That trade is not worth it.
+#
+#  The fast, genuinely useful checks live in ci.yml and run everywhere on every
+#  push. This workflow is the heavyweight confirmation, run by hand.
+#
+#  BEFORE THE FIRST RUN, on the machine you want to use:
+#
+#    1. Install Cygwin64 with make, autoconf, m4, zip, unzip, git, python3
+#    2. Install "Desktop development with C++" (VS 2022) + Windows SDK
+#    3. Unpack a Boot JDK 21 to C:\tools\bootjdk-21
+#    4. Register the runner with the `j47-build` label:
+#         gh api -X POST repos/bismuth47/J47-jdk/actions/runners \
+#           -f name=j47-win-builder -f labels=j47-build \
+#           -f runner_group_id=1 -f ephemeral=false
+#       (or use the Settings -> Actions -> Runners -> New runner wizard)
+#
+#  KEEP THE BUILD TREE OFF ANY SYNCED FOLDER. OneDrive made writing the 357 MB
+#  interim java.base.jmod take over 15 minutes and produced sporadic LNK1327
+#  (rc.exe) failures plus hung make/bash pairs. The workflow below builds in
+#  C:\j47ci, deliberately outside the checkout.
+# ============================================================================
+name: build-windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      heap:
+        description: 'Benchmark heap (e.g. 1G, 4G)'
+        required: false
+        default: '1G'
+      duration:
+        description: 'Benchmark duration in seconds'
+        required: false
+        default: '120'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-windows
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: configure, build, verify, benchmark
+    runs-on: [self-hosted, j47-build, windows]
+    timeout-minutes: 180
+
+    defaults:
+      run:
+        shell: cmd
+
+    env:
+      # Deliberately outside the runner's work directory (see header).
+      TP_BUILD_ROOT_CYG: /cygdrive/c/j47ci
+      J47_BOOT_JDK: /cygdrive/c/tools/bootjdk-21
+      CYGWIN_BASH: C:\cygwin64\bin\bash.exe
+
+    steps:
+      - name: Check out J47
+        uses: actions/checkout@v4
+
+      - name: Report the toolchain
+        run: |
+          echo JAVA_HOME=%JAVA_HOME%
+          where cl.exe || echo "WARNING: MSVC not on PATH outside a vcvars shell (expected here)"
+          if exist "%CYGWIN_BASH%" (echo Cygwin: OK) else (echo "ERROR: Cygwin64 missing" & exit /b 1)
+          dir C:\tools\bootjdk-21\bin\java.exe >nul 2>&1 && echo "BootJDK: OK" || (echo "ERROR: BootJDK21 missing" & exit /b 1)
+
+      - name: Environment check
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\01_env_check.ps1
+
+      - name: Verify the patch set applies to the OpenJDK tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -d jdk21u/.git ]; then
+            git clone --depth 1 --branch jdk-21.0.13+7 \
+              https://github.com/openjdk/jdk21u.git jdk21u
+          fi
+          cd jdk21u
+          git checkout -q jdk-21.0.13+7 2>/dev/null || true
+          for p in J47-lowlatency.patch J47-throughput-2mb.patch J47-msvc1944-c2280.patch; do
+            git apply "../patches/$p"
+            echo "applied: $p"
+          done
+          git diff --stat
+
+      - name: Configure (out-of-source, in a vcvars64 shell)
+        run: |
+          call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
+          "%CYGWIN_BASH%" --login -c "export TP_BUILD_ROOT_CYG='%TP_BUILD_ROOT_CYG%'; cd %CD:~3,-3% && ./scripts/02_configure_tp.sh ./jdk21u"
+
+      - name: Build
+        run: |
+          call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
+          "%CYGWIN_BASH%" --login -c "export TP_BUILD_ROOT_CYG='%TP_BUILD_ROOT_CYG%'; cd %CD:~3,-3% && ./scripts/05_build.sh ./jdk21u"
+
+      - name: Verify the J47 defaults are live
+        run: |
+          set J47_JDK=C:\j47ci\images\jdk
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\05_verify.ps1 "%J47_JDK%"
+
+      - name: Benchmark
+        run: |
+          set J47_JDK=C:\j47ci\images\jdk
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\06_bench.ps1 ^
+            -Jdk "%J47_JDK%" -Heap %{{ github.event.inputs.heap || '1G' }} ^
+            -DurationSec %{{ github.event.inputs.duration || '120' }}
+
+      - name: Analyse the GC log
+        shell: pwsh
+        run: |
+          $log = Get-ChildItem out\bench-*\gc.log | Sort-Object LastWriteTime | Select-Object -Last 1
+          if (-not $log) { Write-Host "::error::no gc.log produced"; exit 1 }
+          python scripts\07_gc_log_analyze.py --log $log.FullName
+          Get-Content $log.FullName | Select-String 'Allocation Stall \(' |
+            Measure-Object | ForEach-Object { Write-Host "allocation stall events: $($_.Count)" }
+
+      - name: Upload the JDK image, the GC log and the analysis
+        uses: actions/upload-artifact@v4
+        with:
+          name: j47-jdk-image-and-bench
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            out/bench-*/gc.log
+            out/bench-*/result.txt
+            out/bench-*/flags.txt
+            out/bench-*/version.txt

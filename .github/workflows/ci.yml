@@ -1,0 +1,267 @@
+# ============================================================================
+#  Fast validation - runs on every push and pull request.
+#
+#  Everything here is cheap (a few minutes) and needs no toolchain beyond what a
+#  GitHub-hosted runner already has. The expensive full JDK build lives in
+#  build-windows.yml and is manual / self-hosted.
+#
+#  What this catches:
+#    - a patch that no longer applies to the pinned OpenJDK tag
+#    - a PowerShell script that does not parse (a very common failure mode:
+#      BOM-less UTF-8 with non-ASCII text is read as the ANSI code page by
+#      Windows PowerShell 5.1 and turns into a syntax error)
+#    - a shell script that does not parse under bash
+#    - an accidental commit of an oversized or forbidden blob
+#    - the GC log analyzer disagreeing with the published numbers
+# ============================================================================
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # The patches are the product. Verify they apply, in order, to the exact tag
+  # the README and the benchmark results were produced against.
+  # ---------------------------------------------------------------------------
+  patches:
+    name: patch set applies to jdk-21.0.13+7
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out J47
+        uses: actions/checkout@v4
+
+      - name: Check out OpenJDK 21u (pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: openjdk/jdk21u
+          ref: jdk-21.0.13+7
+          path: jdk21u
+
+      - name: Verify the pinned tag still exists upstream
+        run: |
+          git -C jdk21u rev-parse HEAD
+          echo "OpenJDK commit: $(git -C jdk21u rev-parse --short HEAD)"
+
+      - name: Apply the patch set in order
+        run: |
+          set -euo pipefail
+          cd jdk21u
+          for p in J47-lowlatency.patch J47-throughput-2mb.patch J47-msvc1944-c2280.patch; do
+            echo "::group::git apply --check $p"
+            git apply --check "../patches/$p"
+            git apply "../patches/$p"
+            echo "applied: $p"
+            echo "::endgroup::"
+          done
+
+      - name: Assert the expected footprint (6 files)
+        run: |
+          set -euo pipefail
+          cd jdk21u
+          git diff --stat
+          n=$(git diff --name-only | wc -l)
+          echo "changed files: $n"
+          if [ "$n" -ne 6 ]; then
+            echo "::error::expected 6 changed files, got $n"
+            exit 1
+          fi
+
+      - name: Assert the J47 GC defaults actually flipped
+        run: |
+          set -euo pipefail
+          cd jdk21u
+          # Generational ZGC must be selected in gcConfig.cpp, not arguments.cpp.
+          grep -q 'product(bool, ZGenerational, true' src/hotspot/share/gc/shared/gc_globals.hpp
+          grep -q 'product(bool, AlwaysPreTouch, true' src/hotspot/share/gc/shared/gc_globals.hpp
+          grep -q 'product(bool, ForceTimeHighResolution, true' src/hotspot/share/runtime/globals.hpp
+          grep -q 'FLAG_SET_ERGO_IF_DEFAULT(UseZGC, true)' src/hotspot/share/gc/shared/gcConfig.cpp
+          grep -q 'FLAG_SET_ERGO_IF_DEFAULT(ZGenerational, true)' src/hotspot/share/gc/shared/gcConfig.cpp
+          # The regression guard: large pages must NOT be forced from ergonomics.
+          if grep -q 'FLAG_SET_ERGO_IF_DEFAULT(UseLargePages' src/hotspot/share/runtime/arguments.cpp; then
+            echo "::error::UseLargePages is forced from ergonomics again - this crashes every JVM start (lcm(0,n))"
+            exit 1
+          fi
+          echo "J47 GC defaults and the large-page regression guard look correct"
+
+      - name: Patches are LF and have no CR
+        run: |
+          set -euo pipefail
+          if grep -lU $'\r' patches/*.patch; then
+            echo "::error::CRLF found in a patch - git apply will choke. Run scripts/repo/00_organize_repo.sh"
+            exit 1
+          fi
+          echo "all patches are LF"
+
+  # ---------------------------------------------------------------------------
+  # Windows script hygiene. Windows PowerShell 5.1 reads a BOM-less script using
+  # the system ANSI code page, so a .ps1 containing non-ASCII text can be
+  # corrupted into a syntax error. bash -n catches CRLF (`do\r`).
+  # ---------------------------------------------------------------------------
+  scripts:
+    name: script lint
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Every PowerShell script parses
+        shell: pwsh
+        run: |
+          $failed = $false
+          Get-ChildItem scripts -Recurse -Filter *.ps1 | ForEach-Object {
+            $errs = $null; $toks = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+                $_.FullName, [ref]$toks, [ref]$errs)
+            if ($errs.Count -eq 0) { Write-Host "  OK   $($_.Name)" }
+            else {
+              Write-Host "  FAIL $($_.Name): line $($errs[0].Extent.StartLineNumber) $($errs[0].Message)"
+              $failed = $true
+            }
+          }
+          if ($failed) { exit 1 }
+
+      - name: Batch files are ASCII-only
+        shell: pwsh
+        run: |
+          # cmd.exe decodes a .cmd/.bat with the console code page, so non-ASCII
+          # bytes render as mojibake on any machine that is not the author's.
+          $bad = Get-ChildItem scripts -Recurse -Include *.cmd,*.bat,*.nsi |
+                 Where-Object {
+                   $b = [IO.File]::ReadAllBytes($_.FullName)
+                   ($b | Where-Object { $_ -gt 127 }).Count -gt 0
+                 }
+          if ($bad) { $bad | ForEach-Object { Write-Host "  non-ASCII: $($_.Name)" }; exit 1 }
+          Write-Host "  all .cmd/.bat/.nsi are ASCII"
+
+      - name: Shell, python and patch files are LF
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -lU $'\r' scripts/*.sh scripts/repo/*.sh scripts/*.py patches/*.patch 2>/dev/null; then
+            echo "::error::CRLF found. Run scripts/repo/00_organize_repo.sh"
+            exit 1
+          fi
+          echo "  all shell/python/patch files are LF"
+
+      - name: All shell scripts parse under bash
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in scripts/*.sh scripts/repo/*.sh; do
+            bash -n "$f" && echo "  OK   $f" || { echo "  FAIL $f"; exit 1; }
+          done
+
+  # ---------------------------------------------------------------------------
+  # Repo hygiene + the published numbers. The analyzer is run against a tiny
+  # synthetic log so the committed script is proven to still work, and the
+  # headline numbers in the README are cross-checked against the published CSV.
+  # ---------------------------------------------------------------------------
+  hygiene:
+    name: repo size guard and analyzer self-test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Nothing oversized or forbidden is tracked
+        shell: pwsh
+        run: |
+          $files = @(git ls-files)
+          $problems = @()
+          foreach ($f in $files) {
+            if (-not (Test-Path -LiteralPath $f)) { continue }
+            $len = (Get-Item -LiteralPath $f).Length
+            if ($len -gt 50MB) { $problems += "oversized ($([math]::Round($len/1MB,1)) MB): $f" }
+            if ($f -match '^(jdk2?\d?u|openjdk[^/]*|build|out|images|tools|dist|msi)/') {
+              $problems += "forbidden path: $f"
+            }
+            if ($f -match '\.(jfr|jmod|msi|zip|7z|dll|lib|exe|pdb|obj|class)$') {
+              $problems += "forbidden type: $f"
+            }
+          }
+          $problems | ForEach-Object { Write-Host "  $_" }
+          if ($problems.Count) { exit 1 }
+          Write-Host "  all $($files.Count) tracked files are small and allowed"
+
+      - name: Analyzer self-test
+        shell: pwsh
+        run: |
+          # A hand-built log with a known answer: 5 pause samples, 1 allocation
+          # stall, and 2 shutdown-summary rows that MUST be ignored (they are
+          # min/max column pairs, not samples - the bug behind the historical
+          # "2,381 samples" figure).
+          $log = @(
+            '[0.100s][info][gc] GC(0) y: Pause Mark Start 0.010ms',
+            '[0.200s][info][gc] GC(1) y: Pause Mark Start 0.020ms',
+            '[0.300s][info][gc] GC(2) y: Pause Mark Start 0.030ms',
+            '[0.400s][info][gc] GC(3) y: Pause Mark Start 0.040ms',
+            '[0.500s][info][gc] GC(4) y: Pause Mark Start 0.050ms',
+            '[0.510s][info][gc] Allocation Stall (bench-worker-0) 1.500ms',
+            '[0.600s][info][gc,stats]       Young Pause: Pause Mark Start   0.001 / 9.999   ms',
+            '[0.600s][info][gc,stats]         Old Pause: Pause Mark End      0.002 / 8.888   ms'
+          ) -join "`n"
+          $tmp = Join-Path $env:TEMP 'j47-selftest.log'
+          Set-Content -Path $tmp -Value $log -Encoding utf8
+          $out = python scripts\07_gc_log_analyze.py --log $tmp 2>&1 | Out-String
+          Write-Host $out
+          if ($out -notmatch 'n=\s*5\s+avg=.*p99=.*max=\s*0\.050') {
+            Write-Host "::error::expected 5 pause samples with max 0.050ms"
+            exit 1
+          }
+          if ($out -notmatch 'Allocation Stall\s+: n=\s*1') {
+            Write-Host "::error::expected exactly 1 allocation stall"
+            exit 1
+          }
+          Write-Host "  analyzer correctly ignores the 2 shutdown-summary rows"
+
+      - name: Published numbers in the README match the published CSV
+        shell: pwsh
+        run: |
+          $csv = Import-Csv benchmarks\gc-performance-summary.csv
+          $p99 = ($csv | Where-Object { $_.metric -eq 'pause_p99_ms' }).value
+          $n   = ($csv | Where-Object { $_.metric -eq 'pause_samples' }).value
+          $mx  = ($csv | Where-Object { $_.metric -eq 'pause_max_ms' }).value
+          $md  = Get-Content -Raw README.md
+          Write-Host "  CSV: P99=$p99 ms, max=$mx ms, n=$n samples"
+          # The README formats counts with thousands separators (2,375), the CSV
+          # does not (2375). Accept either spelling, otherwise this check fails
+          # on a perfectly correct README.
+          $missing = @()
+          foreach ($v in @($p99, $n, $mx)) {
+            $s = [string]$v
+            $alt = [regex]::Replace($s, '\B(?=(\d{3})+(?!\d))', ',')
+            if (($md -notmatch [regex]::Escape($s)) -and ($md -notmatch [regex]::Escape($alt))) {
+              $missing += $s
+            }
+          }
+          if ($missing.Count) {
+            Write-Host "::error::README does not mention the published value(s): $($missing -join ', ')"
+            exit 1
+          }
+          Write-Host "  README headline numbers agree with benchmarks/gc-performance-summary.csv"
+
+      - name: The stale 2,381-sample claim is never presented as fact
+        shell: pwsh
+        run: |
+          # 2381 / 0.028 may appear, but only as a documented corrected figure.
+          # Reject the README if it ever shows up as a headline result.
+          $md = Get-Content -Raw README.md
+          $bad = [regex]::Matches($md, '\|[^\r\n]*(2,?381|0\.028)[^\r\n]*\|\s*\*?\*?(2,?381|0\.028)')
+          if ($bad.Count) {
+            Write-Host "::error::README presents 2,381 / 0.028 as a measured result:"
+            $bad | ForEach-Object { Write-Host "  $($_.Value)" }
+            exit 1
+          }
+          Write-Host "  2,381 / 0.028 appear only as the documented, corrected figure"
+
+

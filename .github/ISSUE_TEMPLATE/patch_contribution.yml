@@ -1,0 +1,79 @@
+name: Patch or build-kit contribution
+description: Propose a HotSpot patch, a JDK backport, or a build-pipeline fix
+labels: ["enhancement", "needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please read [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md) first. The
+        short version: target **one** upstream tag, keep hunks small, and guard
+        every ergonomics change with `FLAG_SET_ERGO_IF_DEFAULT` so `-XX:`
+        overrides keep working.
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of change is this
+      options:
+        - HotSpot patch
+        - Backport to another JDK line
+        - Build script / configure change
+        - Benchmark or analysis improvement
+        - Documentation
+    validations:
+      required: true
+
+  - type: input
+    id: target
+    attributes:
+      label: Target OpenJDK tag
+      description: Which upstream tag does this apply to?
+      placeholder: jdk-21.0.13+7
+    validations:
+      required: true
+
+  - type: textarea
+    id: diff
+    attributes:
+      label: Proposed change
+      description: |
+        Show the diff, or link to a branch. One behavioural change per hunk.
+      render: diff
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: |
+        What does this improve, and what is the risk? If it changes a GC
+        default, say so explicitly.
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: |
+        Paste the output of `scripts/verify_patches.ps1`, `scripts/05_verify.ps1`
+        and the analyzer. A patch with no evidence that it does not regress
+        something will sit unmerged.
+      render: shell
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: This targets a single upstream tag, named above
+          required: true
+        - label: I ran `scripts/verify_patches.ps1` and it reports PATCH SET OK
+          required: true
+        - label: New `.sh`/`.patch`/`.py` files are LF
+          required: false
+        - label: I re-ran the benchmark, including numbers that got worse
+          required: false

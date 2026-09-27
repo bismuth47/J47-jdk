@@ -115,6 +115,7 @@ $Allow = @(
     '.gitignore', '.gitattributes', '.editorconfig',
     'README.md', 'LICENSE', 'CHANGELOG.md',
     'CONTRIBUTING.md', 'SECURITY.md', 'CODE_OF_CONDUCT.md',
+    '.github',
     'patches', 'scripts', 'benchmarks', 'docs', 'bench', 'installer'
 )
 

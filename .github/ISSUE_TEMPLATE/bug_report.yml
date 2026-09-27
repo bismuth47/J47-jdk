@@ -1,0 +1,94 @@
+name: Bug report
+description: Something in the build kit, a patch, or a script does not work
+labels: ["bug", "needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. Please do **not** report JVM CVEs or GC bugs
+        upstream in OpenJDK here - route those to
+        https://bugs.openjdk.org instead. This repository is only the patch set
+        and build pipeline.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you see, and what did you expect instead?
+      placeholder: |
+        `make images` stops at support_images_jmods__create_java.desktop.jmod
+        Expected: `BUILD OK`
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: input
+    id: jdk
+    attributes:
+      label: OpenJDK tag
+      description: Which upstream tag were you building from?
+      placeholder: jdk-21.0.13+7
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: The tail of the build log, and the exit code.
+      render: shell
+    validations:
+      required: true
+
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Which stage failed
+      options:
+        - Environment check (01_env_check)
+        - Patch application
+        - configure (02_configure)
+        - make images (05_build)
+        - Verify (05_verify)
+        - Benchmark / analysis (06, 07)
+        - Repository tooling (scripts/repo)
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      value: |
+        OS / build:
+        Visual Studio:
+        Windows SDK:
+        Cygwin version:
+        BootJDK:
+        Build root (in-source or TP_BUILD_ROOT_CYG):
+        Inside OneDrive or another sync folder: yes / no
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues for this
+          required: true
+        - label: I am building on a local disk, not inside OneDrive/Dropbox
+          required: false
+        - label: I ran `scripts/verify_patches.ps1` (if the patches are involved)
+          required: false

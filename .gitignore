@@ -284,6 +284,8 @@ $RECYCLE.BIN/
 !SECURITY.md
 !CHANGELOG.md
 !CODE_OF_CONDUCT.md
+!/.github/
+!/.github/**
 !.gitignore
 !.gitattributes
 !.editorconfig

@@ -1,0 +1,21 @@
+# CODEOWNERS - who reviews what
+#
+# The default owner is requested for review automatically on every pull request.
+# Add more specific owners below as contributors become reliable reviewers.
+
+*                       @bismuth47
+
+# The product itself. Any change to a patch needs extra care: a hunk that fails
+# to apply, or one that silently changes a GC default, breaks every build.
+/patches/               @bismuth47
+
+# Build pipeline. Scripts carry hardcoded Windows/Cygwin/MSVC specifics.
+/scripts/               @bismuth47
+
+# Published numbers. Reviewers should re-run the analyzer, not just read.
+/benchmarks/            @bismuth47
+
+# The harbour file - last word goes to the maintainer.
+/README.md              @bismuth47
+/LICENSE                @bismuth47
+/.github/               @bismuth47
