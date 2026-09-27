@@ -38,6 +38,7 @@ param(
     [string] $UserName = '',
     [string] $UserEmail= '',
     [string] $Message  = '',
+    [string] $MessageFile = '',
     [switch] $Force
 )
 
@@ -141,6 +142,13 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # ----------------------------------------------------------------- 4. commit
+# Allow the message to come from a file: multi-line messages passed as a
+# command-line argument are fragile across shells (PowerShell splits on newlines
+# when forwarding to a child process).
+if ($MessageFile) {
+    if (!(Test-Path $MessageFile)) { throw "commit message file not found: $MessageFile" }
+    $Message = (Get-Content -Raw $MessageFile)
+}
 $msg = if ($Message) { $Message } else {
 @"
 J47: ultra-low latency custom OpenJDK for Windows (Generational ZGC + MSVC LTO)
@@ -162,8 +170,15 @@ GitHub Releases.
 
 Write-Host ''
 Write-Host '=== [4/5] commit ===' -ForegroundColor Cyan
-& git -c core.autocrlf=false commit -m $msg
+# Write the message to a file and use `git commit -F`. Passing it with -m
+# requires the shell to round-trip embedded quotes and newlines, which is not
+# reliable and produced "pathspec 'not' did not match" on a message that
+# contained a quoted word.
+$msgFile = Join-Path $env:TEMP "j47_commit_msg_$PID.txt"
+[IO.File]::WriteAllText($msgFile, ($msg -replace "`r`n", "`n"), (New-Object Text.UTF8Encoding $false))
+& git -c core.autocrlf=false commit --file $msgFile
 $commitRc = $LASTEXITCODE
+Remove-Item $msgFile -ErrorAction SilentlyContinue
 
 if ($commitRc -ne 0) {
     # Most likely "nothing to commit" on a re-run - that is not a failure.

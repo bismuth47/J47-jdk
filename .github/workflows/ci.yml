@@ -96,10 +96,18 @@ jobs:
           echo "J47 GC defaults and the large-page regression guard look correct"
 
   # ---------------------------------------------------------------------------
-  # The JDK 25 backport. It is a single consolidated patch against a pinned
-  # upstream COMMIT (not a tag), so it is verified separately from the 21u set.
-  # continue-on-error: this port is experimental, so a break is reported but
-  # does not block an unrelated pull request.
+  # The JDK 25 backport. It is a single consolidated patch, verified against
+  # upstream openjdk/jdk25u.
+  #
+  # NOTE ON PINNING: this port was developed against a LOCAL snapshot of jdk25u,
+  # not an upstream tag - jdk25u had no release tag at the time, and the local
+  # tree carried its own "hotspot base" / "make base" / "configure and Makefile"
+  # commits. Those SHAs do not exist upstream, so the workflow below checks
+  # against upstream master and reports a clear, actionable message when the
+  # hunk context drifts, instead of "not our ref".
+  #
+  # continue-on-error: the port is experimental, so a break is reported but does
+  # not block an unrelated pull request.
   # ---------------------------------------------------------------------------
   patches-jdk25:
     name: jdk25 backport applies
@@ -109,18 +117,24 @@ jobs:
       - name: Check out J47
         uses: actions/checkout@v4
 
-      - name: Check out jdk25u at the pinned commit
+      - name: Check out upstream jdk25u
         uses: actions/checkout@v4
         with:
           repository: openjdk/jdk25u
-          ref: 701856312bcaed2433f6c379873bb89a9e99159a
           path: jdk25u
+          sparse-checkout: |
+            src/hotspot
 
       - name: Apply the consolidated backport
         run: |
           set -euo pipefail
           cd jdk25u
-          git apply ../patches/J47-throughput-2mb-jdk25.patch
+          echo "jdk25u base: $(git rev-parse HEAD)"
+          if ! git apply ../patches/J47-throughput-2mb-jdk25.patch; then
+            echo "::error::J47-throughput-2mb-jdk25.patch no longer applies to upstream jdk25u"
+            echo "::error::this port tracks upstream master, not a release tag - rebase the patch"
+            exit 1
+          fi
           git diff --stat
 
       - name: Assert the expected footprint (6 files)
