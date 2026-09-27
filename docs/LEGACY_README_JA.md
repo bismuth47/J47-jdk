@@ -11,7 +11,7 @@ Azul Prime (C4/Falcon) の完全再現は不可。ZGC既定化による近似策
 
 ## 手順
 
-1. `01_env_check.sh` (MSYS2) + `01_env_check.ps1` (管理者PS) を実行
+1. `scripts/01_env_check.sh` (MSYS2) + `scripts/01_env_check.ps1` (管理者PS) を実行
    - BootJDK21 (Zulu21等) を `C:\tools\bootjdk-21` に配置
    - `[Lock Pages in Memory]` 権限付与 + 再起動
 2. JDK21ソース取得: `git clone https://github.com/openjdk/jdk21u`
@@ -29,15 +29,15 @@ Azul Prime (C4/Falcon) の完全再現は不可。ZGC既定化による近似策
    - 実績値: `--with-debug-level=release` + `--enable-jvm-feature-link-time-opt`
      (`--with-build-type` / `--enable-lto` はJDK21のconfigureで非対応のため修正済み)
    - Windows既知問題: vcvars抽出でSDK um/sharedパスが欠落し `LNK1104 kernel32.lib` になる
-     → `02_configure.sh` 内 `--with-extra-cflags/ldflags` (umパス補完) で回避
+     → `scripts/02_configure.sh` 内 `--with-extra-cflags/ldflags` (umパス補完) で回避
 5. `./05_build.sh ./jdk21u`
    - configure は `VS170COMNTOOLS` を見て MSVC を検出するため、**vcvars64.bat を読み込んだ
      環境**で Cygwin bash を起動する (`vcvars64.bat` が `VS170COMNTOOLS` を設定する):
      ```
-     cmd /c "call ""C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"" >nul && C:\cygwin64\bin\bash.exe --login -c ""cd /cygdrive/c/Users/raiko/OneDrive/Desktop/J47 && ./05_build.sh ./jdk21u"""
+     cmd /c "call ""C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"" >nul && C:\cygwin64\bin\bash.exe --login -c ""cd /cygdrive/c/<path>/<repo> && ./scripts/05_build.sh ./jdk21u"""
      ```
-     実績スクリプト: `run_build_tp2.cmd` (vcvars64 + 一時領域固定), 成功ログ: `tp_build3.log` (クラッシュ修正) / `tp_build4.log` (MaxVectorSize 修正)
-6. `powershell -File 05_verify.ps1 C:\Users\raiko\OneDrive\Desktop\J47\jdk21u\build\windows-x86_64-server-release\images\jdk`
+     実績スクリプト: `scripts/run_build_tp2.cmd` (vcvars64 + 一時領域固定), 成功ログ: `tp_build3.log` (クラッシュ修正) / `tp_build4.log` (MaxVectorSize 修正)
+6. `powershell -ExecutionPolicy Bypass -File scripts\05_verify.ps1`
 
 ## 2026-09-27 追記: TPビルドの起動クラッシュ修正 (J47-tp-ergo-fix)
 
@@ -60,13 +60,13 @@ Azul Prime (C4/Falcon) の完全再現は不可。ZGC既定化による近似策
   - `MaxVectorSize` は auto のまま (AVX2=32 / AVX-512=64)。強制すると AVX2 機で
     毎回 `MaxVectorSize must be at most 32 on this platform` 警告が出て 32 にクランプされる
 - 実績: `tp_build3.log` = クラッシュ修正込みで `BUILD OK` (2026-09-27 17:42)、
-  `05_verify.ps1` = VERIFY OK (UseZGC/ZGenerational/AlwaysPreTouch=true, ZGC起動ログ確認)。
+  `scripts/05_verify.ps1` = VERIFY OK (UseZGC/ZGenerational/AlwaysPreTouch=true, ZGC起動ログ確認)。
   `MaxVectorSize` 修正(3)込みの再ビルドは `tp_build4.log`。
 - 移設 (2026-09-27 18:12): ビルドツリーを `C:\j47build` へ移設 (OneDrive同期の影響を回避)。
   「ファイル移動 + 新規configure」方式 (junction不可: spec.gmk の埋込絶対パスのため。README 下部の注意参照)。
   新規ビルドは `tp_build_j47build.log` (out-of-source configure `tp_configure_j47build.log` →
   `make images` 成功)。移設後の継続ビルドは `run_build_j47build.cmd` (vcvars64 + SDK PATH +
-  TMP/TEMP固定 + TP_BUILD_ROOT_CYG=/cygdrive/c/j47build)。`02_configure*.sh` / `05_build.sh` は
+  TMP/TEMP固定 + TP_BUILD_ROOT_CYG=/cygdrive/c/j47build)。`02_configure*.sh` / `scripts/05_build.sh` は
   `TP_BUILD_ROOT_CYG` 対応済み。
 - 再パッケージ (2026-09-27 18:14-18:30, `C:\j47pkg\jdk` を中継):
   `J47-JDK-21.zip` (571件, jmods/demo/src.zip 除外、展開物の `-version` 起動確認済み) /
@@ -76,7 +76,7 @@ Azul Prime (C4/Falcon) の完全再現は不可。ZGC既定化による近似策
   旧ビルドで発生していた「heat 収集により `C:\Program Files\J47\JDK-21\jdk\` と余計な `jdk\` ディレクトリがネストされる」問題を修正。
   `build_msi.ps1` で `-srd` (Suppress Root Directory) を指定し、かつ `$Src` が直下に `bin\java.exe` を持つルートを指すように安全装置を追加。
   これにより `C:\Program Files\J47\JDK-21\` の直下に `bin/`, `lib/`, `conf/`, `release` 等が正しくフラットに配置されることを `msiexec /a` にて確認・検証済み。
-- 再現性検証: `verify_patches.ps1` が元ツリーへパッチを順適用し、作業ツリーと
+- 再現性検証: `scripts/verify_patches.ps1` が元ツリーへパッチを順適用し、作業ツリーと
   完全一致することを確認する (tree ハッシュ比較)。
 
 ## Windows ビルド環境の注意 (2026-09-27 実測)
