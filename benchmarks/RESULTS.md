@@ -2,7 +2,7 @@
 
 > **日本語要約:** J47 のビルドで実測した ZGC ポーズ時間の結果です。
 > P99 = **0.027 ms (27 µs)**、最大 = **0.741 ms**、1 ms 超のポーズは **0 回 / 2,375 サンプル**。
-> 详细的解析手順と再現方法は [`README.md`](README.md) を参照してください。
+> 詳細的解析手順と再現方法は [`README.md`](README.md) を参照してください。
 
 All numbers below were **re-derived from the raw unified-logging output**
 (`out/bench-v2/gc.log`, 47,670 lines) using the repository's own analyzer,
