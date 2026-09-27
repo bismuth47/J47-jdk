@@ -40,6 +40,7 @@ param(
     [ValidateSet('Move', 'Copy')]
     [string] $Mode = 'Move',
     [switch] $IncludeLegacy,
+    [switch] $Force,
     [switch] $DryRun
 )
 
@@ -104,9 +105,13 @@ $Map = [ordered]@{
 
     # --- workload + installer source ------------------------------------------
     'J47.nsi'          = 'installer\J47.nsi'
-    'J47-JDK-21.wxs'   = 'installer\J47.wxs'
     'icon.png'         = 'installer\icon.png'
 }
+
+# NOTE: J47-JDK-21.wxs is intentionally NOT in the map. It is a harvested WiX
+# fragment carrying 571 absolute Source= paths from the machine that produced
+# it, so it is Git-ignored and must not be relocated into the published tree.
+# scripts/build_msi.ps1 takes a user-supplied fragment via -Wxs instead.
 
 # patches/ is already the canonical home; we only assert that it exists.
 $ExpectedPatches = @(
@@ -116,7 +121,7 @@ $ExpectedPatches = @(
 )
 
 # ------------------------------------------------------------------ relocate
-$moved = 0; $skipped = 0; $missing = @()
+$moved = 0; $skipped = 0; $missing = @(); $skip = 0
 
 foreach ($from in $Map.Keys) {
     $to = $Map[$from]
@@ -130,6 +135,16 @@ foreach ($from in $Map.Keys) {
         continue
     }
     if (-not $DryRun) { New-Item -ItemType Directory -Force -Path $dstDir | Out-Null }
+
+    # Never silently clobber a destination. A reorganiser that overwrites is a
+    # data-loss bug waiting to happen: if a file was already hand-edited at the
+    # destination, the move would destroy those edits without a word.
+    if ((Test-Path $dstFull) -and -not $Force) {
+        $skip++
+        Write-Host ("  SKIP  {0}  ->  {1}  (destination exists; -Force to overwrite)" -f $from, $to) -ForegroundColor Yellow
+        continue
+    }
+
     Write-Host ("  {0} {1}  ->  {2}" -f $Mode.ToUpper().PadRight(4), $from, $to) -ForegroundColor Cyan
     if (-not $DryRun) {
         if ($Mode -eq 'Move') {
@@ -209,6 +224,7 @@ Write-Host ''
 Write-Host '=== ORGANIZE SUMMARY ===' -ForegroundColor Green
 Write-Host ("  relocated : {0}" -f $moved)
 Write-Host ("  already ok: {0}" -f $skipped)
+if ($skip) { Write-Host ("  skipped   : {0} (destination already existed)" -f $skip) -ForegroundColor Yellow }
 Write-Host ("  EOL->LF   : {0}" -f $eolFixed)
 if ($missing.Count) {
     Write-Host ("  NOT FOUND : {0}" -f $missing.Count) -ForegroundColor Yellow

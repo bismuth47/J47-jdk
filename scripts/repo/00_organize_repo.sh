@@ -22,6 +22,7 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 MODE="${MODE:-move}"
 DRY_RUN="${DRY_RUN:-0}"
 INCLUDE_LEGACY="${INCLUDE_LEGACY:-0}"
+FORCE="${FORCE:-0}"
 BACKUP="$ROOT/.j47-organize-backup"
 
 cd "$ROOT"
@@ -75,16 +76,26 @@ MAP=(
   "BUILD_SUMMARY.md|docs/BUILD_SUMMARY.md"
   # workload + installer source
   "J47.nsi|installer/J47.nsi"
-  "J47-JDK-21.wxs|installer/J47.wxs"
   "icon.png|installer/icon.png"
 )
+# NOTE: J47-JDK-21.wxs is intentionally NOT in the map. It is a harvested WiX
+# fragment carrying 571 absolute Source= paths from the machine that produced
+# it, so it is Git-ignored and must not be relocated into the published tree.
+# scripts/build_msi.ps1 takes a user-supplied fragment via -Wxs instead.
 
-moved=0; skipped=0; missing=()
+moved=0; skipped=0; skip=0; missing=()
 for pair in "${MAP[@]}"; do
   src="${pair%%|*}"; dst="${pair##*|}"
   if [ ! -e "$src" ]; then
     if [ -e "$dst" ]; then skipped=$((skipped+1)); continue; fi
     missing+=("$src"); continue
+  fi
+  # Never silently clobber a destination: a file already hand-edited at the
+  # destination would be destroyed without a word. Override with FORCE=1.
+  if [ -e "$dst" ] && [ "$FORCE" != "1" ]; then
+    skip=$((skip+1))
+    printf '  SKIP  %s  ->  %s  (destination exists; FORCE=1 to overwrite)\n' "$src" "$dst"
+    continue
   fi
   printf '  %s  %s  ->  %s\n' "$(printf '%-4s' "${MODE^^}")" "$src" "$dst"
   if [ "$DRY_RUN" != "1" ]; then
@@ -149,6 +160,9 @@ echo
 echo "=== ORGANIZE SUMMARY ==="
 echo "  relocated : $moved"
 echo "  already ok: $skipped"
+if [ "$skip" -gt 0 ]; then
+  echo "  skipped   : $skip (destination already existed)"
+fi
 echo "  EOL->LF   : $eol_fixed"
 if [ ${#missing[@]} -gt 0 ]; then
   echo "  NOT FOUND : ${#missing[@]}"

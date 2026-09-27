@@ -10,13 +10,24 @@ $J47 = Split-Path -Parent $ScriptDir              # repository root
 # Default image locations, in priority order:
 #   1. out-of-source build root (recommended, outside OneDrive)
 #   2. in-source build/<conf>/images/jdk
-$Candidates = @(
-  (Join-Path $env:TP_BUILD_ROOT_WIN "images\jdk"),
-  "C:\j47build\images\jdk",
-  (Join-Path $J47 "jdk21u\build\windows-x86_64-server-release\images\jdk")
-) | Where-Object { $_ -and $_ -ne "images\jdk" -and (Test-Path (Join-Path $_ "bin\java.exe")) }
-$Jdk = if ($Candidates) { $Candidates[0] } else { "C:\j47build\images\jdk" }
+#
+# Two PowerShell footguns are avoided here:
+#   * Join-Path throws if its first argument is $null, so the optional
+#     $env:TP_BUILD_ROOT_WIN is filtered out BEFORE being joined.
+#   * A pipeline filtering down to a single match returns a scalar, and
+#     $Candidates[0] on a string yields its first *character*, not its only
+#     element - so the @() below is required.
+$Roots = @(
+    $env:TP_BUILD_ROOT_WIN
+    'C:\j47build'
+    (Join-Path $J47 'jdk21u\build\windows-x86_64-server-release')
+) | Where-Object { $_ }   # drop the unset env var before any Join-Path
+
+$Candidates = @($Roots | ForEach-Object { Join-Path $_ 'images\jdk' } |
+                Where-Object { Test-Path (Join-Path $_ 'bin\java.exe') })
+$Jdk = if ($Candidates.Count -gt 0) { $Candidates[0] } else { 'C:\j47build\images\jdk' }
 if ($args.Count -ge 1) { $Jdk = $args[0] }
+Write-Host "using JDK image: $Jdk" -ForegroundColor DarkGray
 $java = Join-Path $Jdk "bin\java.exe"
 if (!(Test-Path $java)) { throw "java.exe not found: $java (build images first)" }
 
