@@ -65,7 +65,7 @@ fi
 
 # ------------------------------------------------------------------ 2. stage
 ALLOW=(
-  .gitignore .gitattributes
+  .gitignore .gitattributes .editorconfig
   README.md LICENSE CHANGELOG.md
   CONTRIBUTING.md SECURITY.md CODE_OF_CONDUCT.md
   patches scripts benchmarks docs bench installer

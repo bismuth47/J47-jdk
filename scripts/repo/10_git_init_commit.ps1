@@ -112,7 +112,7 @@ foreach ($k in @('core.autocrlf', 'core.safecrlf', 'core.eol', 'pull.rebase')) {
 # ALLOWLIST. Everything not named here stays out of Git no matter what
 # .gitignore says.
 $Allow = @(
-    '.gitignore', '.gitattributes',
+    '.gitignore', '.gitattributes', '.editorconfig',
     'README.md', 'LICENSE', 'CHANGELOG.md',
     'CONTRIBUTING.md', 'SECURITY.md', 'CODE_OF_CONDUCT.md',
     'patches', 'scripts', 'benchmarks', 'docs', 'bench', 'installer'
