@@ -1,6 +1,7 @@
 # Ultra-Low Latency Custom OpenJDK for Windows
 ### *Generational ZGC + MSVC Link-Time Optimization — a reproducible build kit*
 
+[![CI](https://github.com/bismuth47/J47-jdk/actions/workflows/ci.yml/badge.svg)](https://github.com/bismuth47/J47-jdk/actions/workflows/ci.yml)
 [![License: GPL-2.0 with Classpath Exception](https://img.shields.io/badge/License-GPLv2%20%2B%20CPE-blue.svg)](LICENSE)
 [![Base: OpenJDK 21u](https://img.shields.io/badge/base-OpenJDK%2021u-437291.svg)](https://github.com/openjdk/jdk21u)
 [![Platform: Windows x64](https://img.shields.io/badge/platform-Windows%20x64-0078D4.svg)](https://learn.microsoft.com/windows/)
@@ -490,6 +491,26 @@ Patches are the interesting contribution. Please read
 * Re-run `scripts/verify_patches.ps1` and paste its output.
 * Re-run the benchmark and update `benchmarks/` — including the numbers that
   got *worse*, not only the ones that improved.
+
+### Continuous integration
+
+`ci.yml` runs on GitHub-hosted runners for every push and pull request, and
+takes about a minute. It does not compile a JVM; it guards the things that break
+silently:
+
+| Check | Catches |
+|---|---|
+| `patch set applies to jdk-21.0.13+7` | a patch that no longer applies, and verifies the J47 GC defaults actually flipped |
+| large-page regression guard | `UseLargePages` being forced from ergonomics again (the crash that killed every JVM start) |
+| `script lint` | a `.ps1` that no longer parses, non-ASCII in a `.cmd`/`.bat`, CRLF in a `.sh`/`.patch` |
+| `repo size guard` | an oversized or forbidden blob sneaking into the tree |
+| `analyzer self-test` | `07_gc_log_analyze.py` regressing — it re-parses a synthetic log and asserts the shutdown-summary rows are still excluded |
+| `README vs CSV` | the published headline figures drifting apart from `benchmarks/gc-performance-summary.csv` |
+
+The full build lives in `build-windows.yml`. It is **manual and self-hosted** on
+purpose: a JDK build needs Cygwin64, a Boot JDK, the Windows SDK and ~6 GB of
+scratch for 20–40 minutes, and GitHub-hosted Windows runners do not have Cygwin.
+Registration instructions are in the workflow file header.
 
 ---
 

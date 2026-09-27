@@ -67,6 +67,14 @@ Initial working build.
   0.028 ms* and *"allocation stalls: 0"*. Both were incorrect; the first
   double-counted ZGC's end-of-run summary table, the second was never measured.
   Corrected in this release — see `benchmarks/RESULTS.md`.
+- The published numbers come from **one** 16-vCPU Windows host. They are not a
+  claim about your hardware.
+- `installer/J47.wxs` is deliberately **not** published: the harvested WiX
+  fragment carries 571 absolute `Source=` paths from the machine that produced
+  it, so shipping it would hand every user a broken MSI. `scripts/build_msi.ps1`
+  takes a product shell via `-Wxs` and re-harvests the file list itself.
+- The attached `.msi` / `.zip` are the artefacts produced during development on
+  that same host. They are **not** rebuilt by the CI in this release.
 
-[Unreleased]: https://github.com/<you>/<repo>/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/<you>/<repo>/releases/tag/v0.1.0
+[Unreleased]: https://github.com/bismuth47/J47-jdk/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/bismuth47/J47-jdk/releases/tag/v0.1.0
