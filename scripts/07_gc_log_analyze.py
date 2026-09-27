@@ -27,12 +27,23 @@ except Exception:
 #  世代prefix: "y:"=Minor内 / "Y:"=Major内Young / "O:"=Old
 RE_PAUSE   = re.compile(r"Pause\s+(Mark Start|Mark End|Relocate Start)\s+.*?(\d+(?:\.\d+)?)\s*ms")
 RE_GEN     = re.compile(r"GC\(\d+\)\s+([YOyo]):")
-RE_CYCLE   = re.compile(r"GC\((\d+)\)\s+(.*?)\s+.*?(\d+(?:\.\d+)?)\s*(ms|s)\s*$")
+# Cycle例: "GC(1) Minor Collection (High Usage) 1020M(100%)->436M(43%) 0.034s"
+#
+# PERFORMANCE: the cycle pattern used to be
+#     r"GC\((\d+)\)\s+(.*?)\s+.*?(\d+(?:\.\d+)?)\s*(ms|s)\s*$"
+# Two adjacent lazy quantifiers ((.*?)\s+.*?) make the engine explore an
+# exponential set of splits per line. On the 14 MB / 125k-line JDK 25 log that
+# pushed a full analysis past 50 seconds; on a 6 MB log it was 2 seconds. Fix by
+# anchoring on the LAST number on the line instead of searching for one:
+#   ...            (.*) \s+ (\d+(?:\.\d+)?) \s* (ms|s) \s*$
+# (.*) is greedy and still backtracks, but only over the tail of one line, which
+# is linear in practice rather than combinatorial.
+RE_CYCLE   = re.compile(r"GC\((\d+)\)\s+(.*)\s+(\d+(?:\.\d+)?)\s*(ms|s)\s*$")
 # Concurrentは集計行のみ ("Concurrent Mark 8.163ms")。内訳行 ("Mark Roots/Follow/Free",
 # "Relocate Remset FP") は除外するため \s+直結の厳密形にする
 RE_MARK    = re.compile(r"Concurrent Mark\s+(\d+(?:\.\d+)?)\s*ms")
 RE_RELOC   = re.compile(r"Concurrent Relocate\s+(\d+(?:\.\d+)?)\s*ms")
-RE_STALL   = re.compile(r"Allocation Stall \(.*?\)\s+(\d+(?:\.\d+)?)\s*ms")
+RE_STALL   = re.compile(r"Allocation Stall\s+\(.*?\)\s+(\d+(?:\.\d+)?)\s*ms")
 RE_GC_ID   = re.compile(r"GC\((\d+)\)")
 RE_YOUNG   = re.compile(r"Minor|Young", re.IGNORECASE)
 RE_OLD     = re.compile(r"Major|Old|Tenured", re.IGNORECASE)

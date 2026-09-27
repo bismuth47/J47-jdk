@@ -55,12 +55,12 @@ Select-String "UseZGC|ZGenerational|ConcGCThreads|UseLargePages|AlwaysPreTouch|U
 
 # JFR: profile設定で常時記録、終了時dump。disk=trueで長時間計測に対応
 # GCログ: gc* + phases=debug + safepoint=info + ローテーション
-# Windows低レイテンシ定番 (J47は既定でZGC/ZGenerational/高分解能タイマだが明示)
+# Windows低レイテンシ定番 (J47は既定でZGC/高分解能タイマ。ZGenerational は JDK24 で
+# 削除済みなので渡さない - 渡すと起動ごとに "support was removed in 24.0" が出る)
 $JvmCommon = @(
     "-Xms$Heap",
     "-Xmx$Heap",
     "-XX:+UseZGC",
-    "-XX:+ZGenerational",
     "-XX:+AlwaysPreTouch",
     "-XX:+UnlockDiagnosticVMOptions",
     "-XX:+DebugNonSafepoints",

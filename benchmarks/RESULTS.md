@@ -58,6 +58,7 @@ The run recorded **109 allocation-stall events totalling 317.2 ms (max
 15.99 ms)** — visible both as `Allocation Stall (thread) X ms` lines and as
 non-zero `Allocation Stalls:` counter rows on 55 GC cycles.
 
+
 It is worth being precise about what this does and does not mean:
 
 * An **allocation stall is not a GC pause.** It is an *application* thread
@@ -75,6 +76,86 @@ It is worth being precise about what this does and does not mean:
 Earlier drafts of this project reported "Allocation Stalls: 0". That number does
 not survive re-reading the log, so the table above reports what the log actually
 contains.
+
+---
+
+## JDK 25 (experimental)
+
+> **日本語要約:** `patches/J47-throughput-2mb-jdk25.patch` は `jdk25u` 用の
+> バックポートです。ビルドは成功しており（`25.0.5-internal-J47-ZGC-tp-jdk25`）、
+> ポーズ性能は良好です。ただし **allocation stall（割り当て待ち）は JDK 21
+> ビルドより明显に悪化しています**。推測せず報告します。
+
+The same changes are ported to `jdk25u` by
+`patches/J47-throughput-2mb-jdk25.patch`, and that build **succeeds**. The
+backport is a **single consolidated patch** — it does not layer the three 21u
+patches — and it is pinned to upstream commit `70185631`, not a release tag.
+
+`ZGenerational` no longer exists in JDK 25; it was folded into ZGC in JDK 24, and
+the JVM prints `Ignoring option ZGenerational; support was removed in 24.0` if
+you pass it. The backport therefore sets only `UseZGC` and relies on generational
+being the sole mode.
+
+### Results (same workload, 1 GB heap, 60 s)
+
+| Metric | JDK 21 build | JDK 25 build | Verdict |
+|---|---:|---:|---|
+| **P99 pause** | 0.027 ms | **0.032 ms** | still ~30× under target |
+| **Max pause** | 0.741 ms | **0.663 ms** | **better** |
+| **Pauses > 1 ms** | 0 / 2,375 | **0 / 4,632** | pass |
+| Mean / P50 | 0.0139 / 0.013 ms | 0.016 / 0.015 ms | comparable |
+| Total STW | 33.1 ms / 668 cycles | 73.9 ms / 1,478 cycles | 2.2× more, 2.2× more cycles |
+| **Allocation stalls** | 109 events / 317 ms | **37,982 events / 741 s** | ⚠️ **much worse** |
+| Young cycle | 11.0 ms avg | 39.2 ms avg | 3.6× longer |
+| Old cycle | 53.1 ms avg | 782.9 ms avg | **14.7× longer** |
+
+**Pause behaviour on JDK 25 is fine — the maximum is actually lower.** The
+mutator, however, is badly starved: 741 s of cumulative allocation stall across
+16 threads in a 60 s run, with old-generation cycles averaging 783 ms. The
+collector cannot keep up with this deliberately over-subscribed workload (a 1 GB
+live set in a 1024 MB heap with 16 allocating threads) the way the 21u build
+does.
+
+Two caveats before reading too much into the comparison:
+
+* **This is not a like-for-like A/B.** The JDK 25 run had a harder profile —
+  2.49 GB/s allocation over 149 GB allocated, versus 8.19 GB/s over 82 GB on
+  21u. Read the table as a signal that the backport needs heap/thread tuning
+  work, not as a clean regression claim against J47.
+* The 25u port is pinned to a **development commit**, not a release tag.
+
+This is why the JDK 25 port is labelled **experimental** and is not part of the
+v0.1.0 release assets.
+
+### Building the JDK 25 port
+
+```bash
+git clone https://github.com/openjdk/jdk25u.git
+cd jdk25u
+git apply ../patches/J47-throughput-2mb-jdk25.patch
+
+# configure needs a Boot JDK of 24 or newer
+export J47_BOOT_JDK=/cygdrive/c/tools/bootjdk-24
+export TP_BUILD_ROOT_CYG=/cygdrive/c/j47build25
+../scripts/02_configure_tp_jdk25.sh ./jdk25u
+../scripts/06_build_tp_jdk25.sh ./jdk25u
+
+# benchmark + analyse
+powershell -File ../scripts/06_bench.ps1 -Jdk C:\j47build25\images\jdk -Heap 1G
+python ../scripts/07_gc_log_analyze.py --log out/bench-*/gc.log
+```
+
+Raw data: `bench-jdk25-gc-summary.csv`, `bench-jdk25-version.txt`,
+`bench-jdk25-result.txt`, `bench-jdk25-flags.txt`.
+
+### Analyzer note
+
+Running the analyzer over the 14 MB / 125k-line JDK 25 log exposed a
+performance bug in the cycle pattern: two adjacent lazy quantifiers
+(`(.*?)\s+.*?`) made the match exponential per line, pushing a full analysis past
+50 seconds. The pattern is now anchored on the last number on the line, which
+brings the same log down to **~2 s** — and incidentally fixes the cycle counts,
+which had been undercounted (young 175 → 1,681, old 29 → 86).
 
 ## Methodology
 

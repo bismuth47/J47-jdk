@@ -157,6 +157,24 @@ measured regression:
 (*pointers to members with explicit initializers*) diagnostic in MSVC 19.44 so
 that recent VS 2022 toolchains can build HotSpot.
 
+### 7. OpenJDK 25 backport (experimental)
+
+`patches/J47-throughput-2mb-jdk25.patch` is a **single consolidated patch** for
+`jdk25u` — it does not layer the three 21u patches. It builds successfully
+(`25.0.5-internal-J47-ZGC-tp-jdk25`) and carries the same ZGC-by-default,
+pre-touch, high-resolution-timer and ZGC-gated ergonomics changes.
+
+The one difference is forced by upstream: **`ZGenerational` no longer exists**,
+having been folded into ZGC in JDK 24. Passing `-XX:+ZGenerational` on a 24+ JVM
+just prints `Ignoring option ZGenerational; support was removed in 24.0`, so
+neither the patch nor the benchmark scripts pass it.
+
+Pause behaviour is good — see
+[`benchmarks/RESULTS.md`](benchmarks/RESULTS.md#jdk-25-experimental) for the
+measured numbers and an honest account of where the backport still needs work.
+The port is pinned to an upstream *commit*, not a release tag, and is therefore
+**not** covered by the v0.1.0 release assets.
+
 ---
 
 ## Measured results in detail
@@ -342,6 +360,27 @@ scripts\06_bench.ps1 -Jdk "C:\j47build\images\jdk" -Heap 1G -DurationSec 120
 python scripts\07_gc_log_analyze.py --log out\bench-*\gc.log
 ```
 
+### Step 9 — Build the JDK 25 backport (optional)
+
+The 21u path above is the supported one. The 25u backport is experimental and
+needs a Boot JDK of 24 or newer:
+
+```bash
+git clone https://github.com/openjdk/jdk25u.git
+cd jdk25u
+git apply ../patches/J47-throughput-2mb-jdk25.patch
+cd ..
+
+export J47_BOOT_JDK=/cygdrive/c/tools/bootjdk-24
+export TP_BUILD_ROOT_CYG=/cygdrive/c/j47build25
+./scripts/02_configure_tp_jdk25.sh ./jdk25u
+./scripts/06_build_tp_jdk25.sh ./jdk25u
+```
+
+The image lands in `$TP_BUILD_ROOT_CYG/images/jdk`. Measured results, and an
+honest note on what still needs tuning, are in
+[`benchmarks/RESULTS.md`](benchmarks/RESULTS.md#jdk-25-experimental).
+
 ---
 
 ## Known pitfalls
@@ -409,11 +448,11 @@ this) avoids most of it.
 ```
 .
 ├── patches/                  the product - 5 patch files
-│   ├── J47-lowlatency.patch            ZGC / ergonomics defaults
-│   ├── J47-throughput-2mb.patch        ZGC-gated JIT ergonomics
+│   ├── J47-lowlatency.patch            ZGC / ergonomics defaults (21u)
+│   ├── J47-throughput-2mb.patch        ZGC-gated JIT ergonomics (21u)
 │   ├── J47-msvc1944-c2280.patch        MSVC 19.44 compatibility
 │   ├── J47-tp-ergo-fix.patch           superseded - folded into the above
-│   └── J47-throughput-2mb-jdk25.patch  backport for jdk25u
+│   └── J47-throughput-2mb-jdk25.patch  single consolidated backport (25u, experimental)
 ├── scripts/                  the build pipeline (00 -> 98)
 │   ├── 01_env_check.{ps1,sh}
 │   ├── 02_configure*.sh               3 variants (generic / TP / JDK 25)

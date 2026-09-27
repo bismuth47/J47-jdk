@@ -95,6 +95,62 @@ jobs:
           fi
           echo "J47 GC defaults and the large-page regression guard look correct"
 
+  # ---------------------------------------------------------------------------
+  # The JDK 25 backport. It is a single consolidated patch against a pinned
+  # upstream COMMIT (not a tag), so it is verified separately from the 21u set.
+  # continue-on-error: this port is experimental, so a break is reported but
+  # does not block an unrelated pull request.
+  # ---------------------------------------------------------------------------
+  patches-jdk25:
+    name: jdk25 backport applies
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Check out J47
+        uses: actions/checkout@v4
+
+      - name: Check out jdk25u at the pinned commit
+        uses: actions/checkout@v4
+        with:
+          repository: openjdk/jdk25u
+          ref: 701856312bcaed2433f6c379873bb89a9e99159a
+          path: jdk25u
+
+      - name: Apply the consolidated backport
+        run: |
+          set -euo pipefail
+          cd jdk25u
+          git apply ../patches/J47-throughput-2mb-jdk25.patch
+          git diff --stat
+
+      - name: Assert the expected footprint (6 files)
+        run: |
+          set -euo pipefail
+          cd jdk25u
+          n=$(git diff --name-only | wc -l)
+          echo "changed files: $n"
+          if [ "$n" -ne 6 ]; then
+            echo "::error::expected 6 changed files, got $n"
+            exit 1
+          fi
+
+      - name: Assert ZGC is default-on and ZGenerational is NOT reintroduced
+        run: |
+          set -euo pipefail
+          cd jdk25u
+          grep -q 'FLAG_SET_ERGO_IF_DEFAULT(UseZGC, true)' src/hotspot/share/gc/shared/gcConfig.cpp
+          # ZGenerational was removed in JDK 24; a backport must not bring it back.
+          if grep -q 'ZGenerational' src/hotspot/share/gc/shared/gc_globals.hpp; then
+            echo "::error::the jdk25 backport reintroduces ZGenerational, removed in JDK 24"
+            exit 1
+          fi
+          # The large-page ergonomics regression must stay fixed here too.
+          if grep -q 'FLAG_SET_ERGO_IF_DEFAULT(UseLargePages' src/hotspot/share/runtime/arguments.cpp; then
+            echo "::error::UseLargePages forced from ergonomics in the jdk25 backport"
+            exit 1
+          fi
+          echo "jdk25 backport looks correct"
+
       - name: Patches are LF and have no CR
         run: |
           set -euo pipefail
@@ -263,5 +319,50 @@ jobs:
             exit 1
           }
           Write-Host "  2,381 / 0.028 appear only as the documented, corrected figure"
+
+      - name: The benchmark scripts are JDK 25 clean
+        shell: pwsh
+        run: |
+          # -XX:+ZGenerational was removed in JDK 24. Hardcoding it makes every
+          # 24+ benchmark print "Ignoring option ZGenerational", and the flag
+          # file lookup for it returns nothing.
+          $b = Get-Content -Raw scripts\06_bench.ps1
+          $bad = [regex]::Matches($b, '(?m)^\s*"-XX:\+ZGenerational"')
+          if ($bad.Count) {
+            Write-Host "::error::06_bench.ps1 still passes -XX:+ZGenerational (removed in JDK 24)"
+            exit 1
+          }
+          # It must also not be used as a J47 default anywhere in the flags list.
+          if ($b -match '^\s*"-XX:\+ZGenerational"') { exit 1 }
+          Write-Host "  06_bench.ps1 does not pass the removed ZGenerational flag"
+
+      - name: The analyzer stays fast on a large log
+        shell: pwsh
+        run: |
+          # RE_CYCLE used two adjacent lazy quantifiers, which is exponential per
+          # line: a 14 MB JDK 25 log took over 50 s. Synthesise a large log and
+          # require it to finish quickly, so the ReDoS cannot come back.
+          $tmp = Join-Path $env:TEMP 'j47-perf.log'
+          $sb = [System.Text.StringBuilder]::new()
+          1..40000 | ForEach-Object {
+            [void]$sb.AppendLine("[0.100s][info][gc] GC($_) y: Minor Collection (High Usage) 1020M(100%)->436M(43%) 0.0$($_%10)1s")
+            [void]$sb.AppendLine("[0.100s][info][gc] GC($_) y: Pause Mark Start 0.01$($_%9)ms")
+          }
+          Set-Content -Path $tmp -Value $sb.ToString() -Encoding utf8
+          Write-Host ("  synthetic log: {0:N1} MB" -f ((Get-Item $tmp).Length / 1MB))
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          $out = python scripts\07_gc_log_analyze.py --log $tmp 2>&1 | Out-String
+          $sw.Stop()
+          Write-Host ("  analyzer took {0:N1}s" -f $sw.Elapsed.TotalSeconds)
+          if ($sw.Elapsed.TotalSeconds -gt 20) {
+            Write-Host "::error::analyzer took over 20s on a synthetic log - the ReDoS is back"
+            exit 1
+          }
+          if ($out -notmatch 'Cycle Young\(Minor\)\s+: n=\s*40000') {
+            Write-Host "::error::expected 40000 young cycles; the cycle regex is undercounting again"
+            Write-Host $out
+            exit 1
+          }
+          Write-Host "  analyzer is linear and counts every cycle"
 
 
