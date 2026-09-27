@@ -1,3 +1,10 @@
+> **⚠️ This document is superseded.**
+> It is the original Japanese build log, kept for provenance. The canonical,
+> current guide is the English [`../README.md`](../README.md), which reflects
+> the post-`scripts/` directory layout, the corrected benchmark numbers, and the
+> ergonomics crash fix. Paths quoted below use the *old* flat layout
+> (`./02_configure.sh` instead of `./scripts/02_configure.sh`).
+
 # J47 カスタムJDK (ZGC既定・低レイテンシ) ビルド手順
 
 Azul Prime (C4/Falcon) の完全再現は不可。ZGC既定化による近似策。

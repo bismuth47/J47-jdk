@@ -6,9 +6,34 @@
     Runs the WiX heat -> candle -> light pipeline over a built JDK image and
     produces J47-JDK-21.msi in the repository `dist/` directory.
 
-    heat   - harvest the JDK file tree into a .wxs
-    candle - compile J47.wxs + the harvested fragment
-    light  - link into the .msi
+    .NOTES
+    `heat -srd` (Suppress Root Directory) is essential. Without it, heat emits
+    a top-level directory element and the MSI ends up nesting everything under
+    C:\Program Files\J47\JDK-21\jdk\ instead of directly under the install root.
+    The $Src sanity check below enforces the same invariant: $Src must be the
+    directory that directly contains bin\java.exe.
+
+    WHY THERE IS NO J47.wxs IN THE REPOSITORY
+    The WiX fragment this script consumes is a *harvested* artefact. In the
+    reference build it carried 571 absolute Source= paths pointing at the
+    original author's TEMP directory
+    (C:\Users\<someone>\AppData\Local\Temp\J47dark\File\...). Committing it
+    would ship those paths to every other user, where they resolve to nothing,
+    and the resulting MSI would be broken. So msi/ and *.wxs are Git-ignored
+    and you supply your own fragment with -Wxs.
+
+    To produce a portable one, harvest it yourself and keep only the hand
+    written <Product>/<Directory>/<Feature> shell, or author it from scratch.
+    scripts/build_msi.ps1 regenerates the *file* half of the fragment on every
+    run via heat; only the product shell has to be supplied.
+
+.EXAMPLE
+    powershell -ExecutionPolicy Bypass -File scripts\build_msi.ps1
+
+.EXAMPLE
+    powershell -ExecutionPolicy Bypass -File scripts\build_msi.ps1 `
+        -JdkRoot C:\j47build\images\jdk -Wxs C:\path\to\J47.wxs
+#>
 
 .NOTES
     `heat -srd` (Suppress Root Directory) is essential. Without it, heat emits
@@ -34,7 +59,7 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $J47 = Split-Path -Parent $ScriptDir              # repository root
 
 if (-not $WixRoot) { $WixRoot = Join-Path $J47 "tools\wix314" }
-if (-not $Wxs)     { $Wxs     = Join-Path $J47 "installer\J47.wxs" }
+if (-not $Wxs)     { $Wxs     = Join-Path $J47 "msi\J47.wxs" }
 
 if ([string]::IsNullOrWhiteSpace($JdkRoot)) {
     $cands = @(
@@ -63,7 +88,12 @@ foreach ($t in @("heat.exe", "candle.exe", "light.exe")) {
               "Install WiX Toolset 3.x and unpack it to $WixRoot (see docs/BUILD_SUMMARY.md)."
     }
 }
-if (!(Test-Path $Wxs)) { throw "WiX source not found: $Wxs" }
+if (!(Test-Path $Wxs)) {
+  throw "WiX product fragment not found: $Wxs`n" +
+        "This is a harvested, machine-specific artefact and is deliberately not" +
+        " committed (see the .NOTES block at the top of this script)." +
+        " Author your own and pass it with -Wxs <path>."
+}
 
 $Out  = Join-Path $J47 "msi\out"
 $Dist = Join-Path $J47 "dist"

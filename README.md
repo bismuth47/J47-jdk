@@ -430,8 +430,8 @@ this) avoids most of it.
 ├── benchmarks/               aggregated results (CSV / MD / small text only)
 ├── docs/                     build notes and the incident write-up
 ├── bench/                    MemPressureBench.java workload
-├── installer/                NSIS source
-├── .gitignore  .gitattributes  LICENSE  CHANGELOG.md
+├── installer/                J47.nsi (NSIS source) + icon
+├── .gitignore  .gitattributes  .editorconfig  LICENSE  CHANGELOG.md
 ├── CONTRIBUTING.md  SECURITY.md  CODE_OF_CONDUCT.md
 └── README.md
 ```
@@ -449,6 +449,7 @@ excluded by `.gitignore`:
 | `*.jfr`, `gc.log*`, `safepoint.log*` | recordings; large and regenerable |
 | `*.log`, `*.err` | `tp_build_j47build.log` alone is 23 MB |
 | `*.msi`, `*.zip`, `*.exe` | the `J47-JDK-21` installers are ~190 MB each |
+| `*.wxs`, `msi/` | the harvested WiX fragment bakes in 571 absolute `Source=` paths from the machine that produced it — shipping it would hand everyone a broken MSI |
 | `tools/`, `.j47-organize-backup/` | local downloads and script backups |
 
 Publish binaries through **GitHub Releases**, never through the Git tree.

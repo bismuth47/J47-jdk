@@ -115,9 +115,12 @@ Makefile
 *.wixpdb
 *.wixobj
 *.wxl
-# NOTE: *.wxs is deliberately NOT ignored. installer/J47.wxs is hand-maintained
-# source and is required to rebuild the MSI; only the heat/candle/light output
-# (installer/*.wixobj, *.wixpdb, msi/out/, dist/) is generated.
+# *.wxs is deliberately NOT tracked: the harvested WiX fragment bakes in
+# absolute Source= paths from the machine that produced it (the reference
+# build carries 571 of them pointing at the original author's TEMP dir).
+# Shipping it would hand every other user a broken MSI. See the .NOTES
+# block in scripts/build_msi.ps1.
+*.wxs
 # WiX / NSIS build scratch
 /nsi_build.*
 /msi/
@@ -273,7 +276,6 @@ $RECYCLE.BIN/
 !bench/*.md
 !installer/
 !installer/*.nsi
-!installer/*.wxs
 !installer/*.md
 !installer/*.png
 !LICENSE

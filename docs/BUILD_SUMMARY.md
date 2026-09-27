@@ -47,12 +47,11 @@ J47 Root/
 
 ### Step 1: Environment Setup
 ```bash
-# Windows (PowerShell as Administrator)
-cd C:\Users\raiko\OneDrive\Desktop\J47
-powershell -File 01_env_check.ps1
+# Windows (PowerShell as Administrator), from the repository root
+powershell -ExecutionPolicy Bypass -File scripts\01_env_check.ps1
 
 # Or MSYS2
-./01_env_check.sh
+./scripts/01_env_check.sh
 ```
 
 **Requirements:**
@@ -63,20 +62,25 @@ powershell -File 01_env_check.ps1
 
 ### Step 2: Configure Build
 ```bash
-cd C:\Users\raiko\OneDrive\Desktop\J47\jdk21u
-../02_configure.sh ./jdk21u
+# from the repository root
+./scripts/02_configure.sh ./jdk21u
 ```
 
 ### Step 3: Build JDK
 ```bash
-cd C:\Users\raiko\OneDrive\Desktop\J47\jdk21u
-../05_build.sh ./jdk21u
+# from the repository root
+./scripts/05_build.sh ./jdk21u
 ```
 
 ### Step 4: Verify Build
 ```powershell
-powershell -File 05_verify.ps1 C:\Users\raiko\OneDrive\Desktop\J47\jdk21u\build\windows-x86_64-server-release\images\jdk
+powershell -ExecutionPolicy Bypass -File scripts\05_verify.ps1
 ```
+
+> The top-level `README.md` is the canonical, up-to-date build guide. This
+> document is the historical build log; where the two disagree, trust the
+> README. Paths below were originally machine-specific and have been rewritten
+> to be relative to the repository root.
 
 ## Prerequisites
 
