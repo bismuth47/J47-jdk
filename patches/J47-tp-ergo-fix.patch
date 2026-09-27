@@ -1,0 +1,81 @@
+# J47-TP ergonomics fix (incremental patch, audit trail).
+# STATUS: already folded into the current patches/J47-throughput-2mb.patch
+#         (2026-09-27). Apply this file ONLY to a tree that still contains the
+#         original, broken hunk (before the regeneration); it will not apply on
+#         top of the updated J47-throughput-2mb.patch.
+#
+# fix 1: drop the ergonomic UseLargePages / LargePageSizeInBytes forcing.
+#   os::init_before_ergo() -> os::large_page_init() (src/hotspot/share/runtime/os.cpp:465)
+#   runs before ergonomics and early-returns while UseLargePages is still default-false
+#   (src/hotspot/os/windows/os_windows.cpp:3344), so os::large_page_size() stays 0.
+#   Forcing the flag on inside Arguments::apply_ergo() made
+#   GCArguments::compute_heap_alignment() (gcArguments.cpp:82) call lcm(0, alignment),
+#   which divides by zero (globalDefinitions.cpp:383-392) -> INT_DIVIDE_BY_ZERO on
+#   every JVM start (hs_err_pid16796.log / the failed java.desktop.jmod target).
+#   Large pages remain opt-in per run: -XX:+UseLargePages (SeLockMemoryPrivilege).
+#
+# fix 2: drop the ergonomic UseCountedLoopSafepoints / LoopStripMiningIter forcing.
+#   ZArguments::initialize() already sets them as *default* values (true / 1000,
+#   zArguments.cpp:191-196). Setting them ergonomically tripped
+#   LoopStripMiningIterConstraintFunc (jvmFlagConstraintsCompiler.cpp:408-416): a
+#   warning on every start plus LoopStripMiningIter rewritten to 1 (a safepoint
+#   poll every counted-loop iteration).
+#
+# fix 3: drop the ergonomic MaxVectorSize=64 forcing. On AVX2-only CPUs (UseAVX=2)
+#   MaxVectorSizeConstraintFunc rejects 64 and printed
+#   "MaxVectorSize must be at most 32 on this platform" on every start (value was
+#   clamped to 32 anyway). The auto default already picks the platform maximum
+#   (32 on AVX2, 64 on AVX-512).
+#
+diff --git a/src/hotspot/share/runtime/arguments.cpp b/src/hotspot/share/runtime/arguments.cpp
+--- a/src/hotspot/share/runtime/arguments.cpp
++++ b/src/hotspot/share/runtime/arguments.cpp
+@@ -3991,25 +3991,35 @@ jint Arguments::apply_ergo() {
+   // i-cache, which directly lengthens the <1ms pause budget.
+   if (UseZGC) {
+     FLAG_SET_ERGO_IF_DEFAULT(UseSuperWord, true);
+-    FLAG_SET_ERGO_IF_DEFAULT(MaxVectorSize, 64);
++    // J47-TP fix 3: never force MaxVectorSize. On AVX2-only CPUs (UseAVX=2)
++    // the value 64 is rejected by MaxVectorSizeConstraintFunc, which printed
++    // "MaxVectorSize must be at most 32 on this platform" on every start and
++    // left the flag clamped to 32 anyway. The auto default already selects the
++    // platform maximum (32 on AVX2, 64 on AVX-512/UseAVX=3), so leave it alone.
+     FLAG_SET_ERGO_IF_DEFAULT(InlineSmallCode, 2500);
+     FLAG_SET_ERGO_IF_DEFAULT(FreqInlineSize, 325);
+     FLAG_SET_ERGO_IF_DEFAULT(MaxInlineSize, 50);
+     FLAG_SET_ERGO_IF_DEFAULT(CICompilerCount, 4);
+     FLAG_SET_ERGO_IF_DEFAULT(ReservedCodeCacheSize, 512*M);
+-    // Counted-loop safepoint polls stay (default false, c2_globals.hpp).
+-    // Keeps TTSP join latency visible instead of batching into long stops.
+-    FLAG_SET_ERGO_IF_DEFAULT(UseCountedLoopSafepoints, true);
+-    // Strip mining off (default 0 already): avoids code bloat on ZGC paths.
+-    FLAG_SET_ERGO_IF_DEFAULT(LoopStripMiningIter, 0);
+-    FLAG_SET_ERGO_IF_DEFAULT(UseLargePages, true);
+-    if (FLAG_IS_DEFAULT(LargePageSizeInBytes)) {
+-      FLAG_SET_ERGO_IF_DEFAULT(LargePageSizeInBytes, 2*M);
+-    } else if (LargePageSizeInBytes > 2*M) {
+-      warning("J47: LargePageSizeInBytes capped to 2M (1GB pages must be opt-in per-run).");
+-      FLAG_SET_ERGO(LargePageSizeInBytes, 2*M);
+-    }
+     FLAG_SET_ERGO_IF_DEFAULT(AlwaysPreTouch, true);
++    // J47-TP fix 1: never touch UseLargePages / LargePageSizeInBytes here.
++    // os::init_before_ergo() -> os::large_page_init() (os.cpp:465-469) has
++    // already run at this point and early-returns while UseLargePages is still
++    // default-false (os_windows.cpp:3344-3347), leaving os::large_page_size()
++    // == 0. Forcing the flag on from ergonomics therefore made
++    // GCArguments::compute_heap_alignment() (gcArguments.cpp:82) call
++    // lcm(0, alignment), which divides by zero (globalDefinitions.cpp:383-392,
++    // INT_DIVIDE_BY_ZERO) and crashed every JVM start. Large pages must stay
++    // opt-in per run: -XX:+UseLargePages (needs SeLockMemoryPrivilege; ZGC then
++    // uses the OS-reported 2MB pages, EnableAllLargePageSizesForWindows=false
++    // keeps 1GB pages out).
++    // J47-TP fix 2: never force UseCountedLoopSafepoints / LoopStripMiningIter.
++    // ZArguments::initialize() already sets them as *default* values
++    // (true / 1000, zArguments.cpp:191-196). Setting them ergonomically made
++    // LoopStripMiningIterConstraintFunc (jvmFlagConstraintsCompiler.cpp:408-416)
++    // print a warning on every start and rewrite LoopStripMiningIter to 1,
++    // i.e. a safepoint poll on every counted-loop iteration instead of the
++    // intended strip mining.
+   }
+ 
+   // Set bytecode rewriting flags

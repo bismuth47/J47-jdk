@@ -1,0 +1,291 @@
+# =============================================================================
+#  J47 - Ultra-Low Latency Custom OpenJDK for Windows (Generational ZGC + MSVC LTO)
+#  .gitignore
+#
+#  DESIGN RULE: this repository is a *build kit*, not a build output.
+#  Everything that can be regenerated from patches/ + scripts/ must never
+#  reach Git. GitHub hard-rejects blobs > 100 MB and warns above 50 MB; this
+#  tree holds ~800 MB of OpenJDK sources, installers and logs, so the list
+#  below is deliberately aggressive.
+#
+#  What MUST be tracked:
+#      patches/     *.patch        <- the actual product
+#      scripts/     *.sh *.ps1 *.cmd *.py *.md
+#      benchmarks/  *.csv *.md *.txt (aggregated results ONLY)
+#      docs/        *.md
+#      bench/       *.java
+#      installer/   *.nsi
+#      README.md / LICENSE / .gitattributes
+#
+#  See the "SAFETY NET" section at the bottom: it re-includes the tracked set
+#  so that no future broad rule above can silently drop the product.
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# 1. OpenJDK source trees  (jdk21u/ alone is ~1.2 GB and carries its own .git)
+# -----------------------------------------------------------------------------
+/jdk21u/
+/jdk25u/
+/jdk20u/
+/jdk17u/
+/jdk2?u*/
+/openjdk*/
+/jdk-src/
+/jmods/
+/legal/
+/src.zip
+
+# Any other checkout that may appear next to the kit
+/jdk*/
+/openjdk*/
+/openjdk-*/
+
+# -----------------------------------------------------------------------------
+# 2. Build trees and configure/make output
+#    (in-source build/ AND the out-of-source TP_BUILD_ROOT_CYG builds)
+/build/
+build/
+/images/
+images/
+/make-support/
+/configure-support/
+/buildtools/
+/support/
+/hotspot/
+/jdk/
+/test/
+/work/
+
+# Out-of-source build roots driven by scripts/02_configure*.sh
+/j47build/
+/j47build25/
+/j47pkg/
+TP_BUILD_ROOT_CYG=*
+
+# Generated make/spec files: machine specific, embed absolute paths
+spec.gmk
+bootcycle-spec.gmk
+buildjdk-spec.gmk
+*.spec.gmk
+configure.log
+configure.log.old
+config.log
+config.status
+Makefile
+
+# -----------------------------------------------------------------------------
+# 3. Compiled objects, binaries, installers
+# -----------------------------------------------------------------------------
+*.obj
+*.o
+*.a
+*.lib
+*.exp
+*.ilk
+*.pdb
+*.res
+*.dll
+*.exe
+*.so
+*.dylib
+*.manifest
+*.iobj
+*.ipdb
+*.iplo
+*.objlnk
+
+# JVM images
+*.jmod
+*.jimage
+*.class
+
+# Windows installers and archives
+# (J47-JDK-21.msi / .exe / .zip are ~190 MB each)
+*.msi
+*.msp
+*.msm
+*.cab
+*.zip
+*.7z
+*.tar
+*.tar.gz
+*.tgz
+*.xz
+*.wixpdb
+*.wixobj
+*.wxl
+# NOTE: *.wxs is deliberately NOT ignored. installer/J47.wxs is hand-maintained
+# source and is required to rebuild the MSI; only the heat/candle/light output
+# (installer/*.wixobj, *.wixpdb, msi/out/, dist/) is generated.
+# WiX / NSIS build scratch
+/nsi_build.*
+/msi/
+/dist/
+
+# -----------------------------------------------------------------------------
+# 4. JFR recordings, GC logs, safepoint logs, JIT logs
+# -----------------------------------------------------------------------------
+*.jfr
+*.jfc
+gc.log
+gc.log.*
+gc-*.log
+gc_*.log
+safepoint.log
+safepoint.log.*
+jit.log
+jit.log.*
+zgc.log
+zgc.log.*
+zgc*.log
+zgc*.txt
+*gc*.log
+*-gc-*.log
+/allocation-*.log
+
+# -----------------------------------------------------------------------------
+# 5. Build / test / install logs  (tp_build_j47build.log alone is 23 MB)
+# -----------------------------------------------------------------------------
+*.log
+*.log.*
+*.err
+*.out
+*.trace
+/logs/
+/log/
+hs_err_pid*.log
+replay_pid*.log
+hs_err*.log
+*-build*.log
+*-build*.err
+*-config*.log
+*-config*.err
+build25.*
+conf25.*
+tp_build*
+tp_configure*
+verify_patches.*
+msi-install*.log
+msi_build.*
+nsi_build.*
+admin_tasks.log
+flags25.txt
+lp25.txt
+
+# -----------------------------------------------------------------------------
+# 6. Local tool downloads, caches, scratch output
+# -----------------------------------------------------------------------------
+/tools/
+/out/
+/bench-out/
+**/__pycache__/
+*.py[cod]
+.venv/
+venv/
+.cache/
+/.mypy_cache/
+/.pytest_cache/
+node_modules/
+
+# Cygwin mirror that curl unpacks as a literal directory name
+/https%3a%2f%2f*/
+*%3a%2f%2f*/
+
+# -----------------------------------------------------------------------------
+# 7. Credentials and machine-local configuration
+# -----------------------------------------------------------------------------
+.env
+.env.*
+*.local
+local.properties
+secrets.json
+id_rsa
+id_ed25519
+*.pem
+*.key
+*.pfx
+*.p12
+
+# -----------------------------------------------------------------------------
+# 8. Editor / IDE / OS noise
+# -----------------------------------------------------------------------------
+.vscode/
+.idea/
+*.code-workspace
+.project
+.classpath
+.settings/
+*.iml
+*.user
+*.suo
+*.sln.docstates
+*.VC.db
+*.VC.opendb
+*.sdf
+*.opensdf
+*~
+*.swp
+*.bak
+*.orig
+*.rej
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+desktop.ini
+$RECYCLE.BIN/
+*.lnk
+# OneDrive / Office lock files
+~$*
+*.tmp
+*.temp
+
+# -----------------------------------------------------------------------------
+# 9. One-off analysis scratch + organize-script backups (kept on disk, never published)
+# -----------------------------------------------------------------------------
+/tools/legacy-analysis/
+/.j47-organize-backup/
+
+# -----------------------------------------------------------------------------
+# 10. SAFETY NET
+#     Explicit re-includes. Keep this block LAST and keep it complete: it is the
+#     guarantee that the shipped product survives any future rule added above.
+# -----------------------------------------------------------------------------
+!patches/
+!patches/*.patch
+!patches/*.diff
+!scripts/
+!scripts/*.sh
+!scripts/*.ps1
+!scripts/*.cmd
+!scripts/*.bat
+!scripts/*.py
+!scripts/*.md
+!scripts/repo/
+!scripts/repo/**
+!benchmarks/
+!benchmarks/**
+!docs/
+!docs/*.md
+!bench/
+!bench/*.java
+!bench/*.md
+!installer/
+!installer/*.nsi
+!installer/*.wxs
+!installer/*.md
+!installer/*.png
+!LICENSE
+!README.md
+!CONTRIBUTING.md
+!SECURITY.md
+!CHANGELOG.md
+!CODE_OF_CONDUCT.md
+!.gitignore
+!.gitattributes
+!.editorconfig
+
+# =============================================================================
+#  END .gitignore
+# =============================================================================

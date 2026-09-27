@@ -1,0 +1,35 @@
+# Normalise line endings across contributors on Windows / Linux / macOS.
+# Patches MUST stay LF: `git apply` and `patch(1)` mis-parse CRLF hunks.
+* text=auto
+
+*.sh    text eol=lf
+*.bash  text eol=lf
+*.py    text eol=lf
+*.patch text eol=lf
+*.diff  text eol=lf
+*.md    text eol=lf
+*.csv   text eol=lf
+*.txt   text eol=lf
+*.java  text eol=lf
+
+*.ps1   text eol=crlf
+*.cmd   text eol=crlf
+*.bat   text eol=crlf
+*.nsi   text eol=crlf
+
+*.jfr   binary
+*.jmod  binary
+*.jimage binary
+*.png   binary
+*.jpg   binary
+*.ico   binary
+*.pdf   binary
+*.zip   binary
+*.msi   binary
+*.exe   binary
+*.dll   binary
+*.pdb   binary
+*.lib   binary
+
+# Never rewrite history or normalize whitespace inside patches.
+*.patch -whitespace

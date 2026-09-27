@@ -1,0 +1,172 @@
+diff --git a/src/hotspot/os/windows/os_windows.cpp b/src/hotspot/os/windows/os_windows.cpp
+index 5a255a7b..2fad4df6 100644
+--- a/src/hotspot/os/windows/os_windows.cpp
++++ b/src/hotspot/os/windows/os_windows.cpp
+@@ -3124,6 +3124,9 @@ size_t os::win32::large_page_init_decide_size() {
+ 
+   if (!os::win32::request_lock_memory_privilege()) {
+     WARN("JVM cannot use large page memory because it does not have enough privilege to lock pages in memory.");
++    // J47: always log once even for ergonomic defaults (was silent when FLAG_IS_DEFAULT).
++    log_warning(gc)("J47: SeLockMemoryPrivilege missing ([Lock Pages in Memory] not granted). "
++                    "Large pages disabled, continuing with regular pages.");
+     return 0;
+   }
+ 
+@@ -3132,6 +3135,13 @@ size_t os::win32::large_page_init_decide_size() {
+     WARN("Large page is not supported by the processor.");
+     return 0;
+   }
++  // J47-TP: startup confirmation only (no behavior change, 2MB path untouched).
++  // Timer precision needs no change: DllMain already calls timeBeginPeriod(1L)
++  // when ForceTimeHighResolution is set (J47 default-on).
++  // J47 note: JDK 25 removed SIZE_FORMAT; JULONG_FORMAT is the portable
++  // replacement for a 64-bit size_t on this LP64 target.
++  log_info(gc)("J47: Large pages selected (min=" JULONG_FORMAT ", req=" JULONG_FORMAT ").",
++               (julong)size, (julong)LargePageSizeInBytes);
+ 
+ #if defined(AMD64)
+   if (!EnableAllLargePageSizesForWindows) {
+@@ -3440,12 +3450,19 @@ char* os::pd_reserve_memory_special(size_t bytes, size_t alignment, size_t page_
+ 
+   if (!is_aligned(bytes, page_size)) {
+     // Fallback to small pages, Windows does not support mixed mappings.
++    // J47: warn on fallback (was silent nullptr).
++    log_warning(gc)("J47: Large pages reserve failed: size not aligned "
++                    "(bytes=" JULONG_FORMAT ", page=" JULONG_FORMAT "), falling back to regular pages.",
++                    (julong)bytes, (julong)page_size);
+     return nullptr;
+   }
+ 
+   // Ensure GetLargePageMinimum() returns a valid positive value
+   size_t large_page_min = GetLargePageMinimum();
+   if (large_page_min <= 0) {
++    // J47: warn when OS reports no large-page support.
++    log_warning(gc)("J47: Large pages unavailable (GetLargePageMinimum()=0). "
++                    "Grant [Lock Pages in Memory] or disable UseLargePages. Falling back.");
+     return nullptr;
+   }
+ 
+diff --git a/src/hotspot/share/gc/shared/gcConfig.cpp b/src/hotspot/share/gc/shared/gcConfig.cpp
+index 402bd0ca..8150bdd6 100644
+--- a/src/hotspot/share/gc/shared/gcConfig.cpp
++++ b/src/hotspot/share/gc/shared/gcConfig.cpp
+@@ -96,7 +96,11 @@ void GCConfig::fail_if_non_included_gc_is_selected() {
+ 
+ void GCConfig::select_gc_ergonomically() {
+   if (os::is_server_class_machine()) {
+-#if INCLUDE_G1GC
++// J47: default to ZGC (generational is the only mode in JDK 25+) instead of G1
++#if INCLUDE_ZGC
++    FLAG_SET_ERGO_IF_DEFAULT(UseZGC, true);
++    FLAG_SET_ERGO_IF_DEFAULT(AlwaysPreTouch, true);
++#elif INCLUDE_G1GC
+     FLAG_SET_ERGO_IF_DEFAULT(UseG1GC, true);
+ #elif INCLUDE_PARALLELGC
+     FLAG_SET_ERGO_IF_DEFAULT(UseParallelGC, true);
+diff --git a/src/hotspot/share/gc/shared/gc_globals.hpp b/src/hotspot/share/gc/shared/gc_globals.hpp
+index 9fdf0d63..a759ca36 100644
+--- a/src/hotspot/share/gc/shared/gc_globals.hpp
++++ b/src/hotspot/share/gc/shared/gc_globals.hpp
+@@ -178,8 +178,8 @@
+           range(1, INT_MAX/3)                                               \
+                                                                             \
+                                                                             \
+-  product(bool, AlwaysPreTouch, false,                                      \
+-          "Force all freshly committed pages to be pre-touched")            \
++  product(bool, AlwaysPreTouch, true,                                       \
++          "Force all freshly committed pages to be pre-touched (J47: default-on)") \
+                                                                             \
+   product(bool, AlwaysPreTouchStacks, false, DIAGNOSTIC,                    \
+           "Force java thread stacks to be fully pre-touched")               \
+diff --git a/src/hotspot/share/memory/allocation.hpp b/src/hotspot/share/memory/allocation.hpp
+index 9e500135..b964cf01 100644
+--- a/src/hotspot/share/memory/allocation.hpp
++++ b/src/hotspot/share/memory/allocation.hpp
+@@ -394,8 +394,13 @@ class ResourceObj {
+   void* operator new [](size_t size) throw() = delete;
+   void* operator new [](size_t size, const std::nothrow_t& nothrow_constant) throw() = delete;
+ 
+-  void  operator delete(void* p) = delete;
+-  void  operator delete [](void* p) = delete;
++  // MSVC 19.44+ (VS2022 17.14) diagnoses C2280 for new-expressions with
++  // potentially-throwing ctors when only a deleted deallocation function
++  // is visible. These objects are never deleted (resource allocation
++  // failure is fatal, not an exception), so trap loudly if it happens.
++  // Cf. MetaspaceObj::operator delete in this file.
++  void  operator delete(void* p) { ShouldNotCallThis(); }
++  void  operator delete [](void* p) { ShouldNotCallThis(); }
+ };
+ 
+ class ArenaObj {
+@@ -406,8 +411,9 @@ class ArenaObj {
+   void* operator new [](size_t size) throw() = delete;
+   void* operator new [](size_t size, const std::nothrow_t& nothrow_constant) throw() = delete;
+ 
+-  void  operator delete(void* p) = delete;
+-  void  operator delete [](void* p) = delete;
++  // Same MSVC 19.44 C2280 rationale as ResourceObj above.
++  void  operator delete(void* p) { ShouldNotCallThis(); }
++  void  operator delete [](void* p) { ShouldNotCallThis(); }
+ };
+ 
+ //----------------------------------------------------------------------
+diff --git a/src/hotspot/share/runtime/arguments.cpp b/src/hotspot/share/runtime/arguments.cpp
+index 79c2130f..60941c0e 100644
+--- a/src/hotspot/share/runtime/arguments.cpp
++++ b/src/hotspot/share/runtime/arguments.cpp
+@@ -3810,6 +3810,40 @@ jint Arguments::apply_ergo() {
+   // Set compiler flags after GC is selected and GC specific
+   // flags (LoopStripMiningIter) are set.
+   CompilerConfig::ergo_initialize();
++  // J47-TP: ZGC-conditional ergonomics (throughput recovery, pause-neutral).
++  // All guarded by IS_DEFAULT so explicit -XX keeps precedence. Deltas are
++  // intentionally small: larger inline/unroll blows up nmethods and hurts
++  // i-cache, which directly lengthens the <1ms pause budget.
++  if (UseZGC) {
++    FLAG_SET_ERGO_IF_DEFAULT(UseSuperWord, true);
++    // J47-TP fix 3: never force MaxVectorSize. On AVX2-only CPUs (UseAVX=2)
++    // the value 64 is rejected by MaxVectorSizeConstraintFunc, which printed
++    // "MaxVectorSize must be at most 32 on this platform" on every start and
++    // left the flag clamped to 32 anyway. The auto default already selects the
++    // platform maximum (32 on AVX2, 64 on AVX-512/UseAVX=3), so leave it alone.
++    FLAG_SET_ERGO_IF_DEFAULT(InlineSmallCode, 2500);
++    FLAG_SET_ERGO_IF_DEFAULT(FreqInlineSize, 325);
++    FLAG_SET_ERGO_IF_DEFAULT(MaxInlineSize, 50);
++    FLAG_SET_ERGO_IF_DEFAULT(CICompilerCount, 4);
++    FLAG_SET_ERGO_IF_DEFAULT(ReservedCodeCacheSize, 512*M);
++    FLAG_SET_ERGO_IF_DEFAULT(AlwaysPreTouch, true);
++    // J47-TP fix 1: never touch UseLargePages / LargePageSizeInBytes here.
++    // os::init_before_ergo() -> os::large_page_init() (os.cpp:476-480) has
++    // already run at this point and early-returns while UseLargePages is still
++    // default-false (os_windows.cpp:3158-3161), leaving os::large_page_size()
++    // == 0. Forcing the flag on from ergonomics therefore made
++    // GCArguments::compute_heap_alignment() (gcArguments.cpp:77) call
++    // lcm(0, alignment), which divides by zero and crashed every JVM start.
++    // Large pages must stay opt-in per run: -XX:+UseLargePages (needs
++    // SeLockMemoryPrivilege; ZGC then uses the OS-reported 2MB pages,
++    // EnableAllLargePageSizesForWindows=false keeps 1GB pages out).
++    // J47-TP fix 2: never force UseCountedLoopSafepoints / LoopStripMiningIter.
++    // ZArguments::initialize() already sets them as *default* values
++    // (true / 1000, zArguments.cpp:196-198). Setting them ergonomically made
++    // LoopStripMiningIterConstraintFunc print a warning on every start and
++    // rewrite LoopStripMiningIter to 1, i.e. a safepoint poll on every
++    // counted-loop iteration instead of the intended strip mining.
++  }
+ 
+   // Set bytecode rewriting flags
+   set_bytecode_flags();
+diff --git a/src/hotspot/share/runtime/globals.hpp b/src/hotspot/share/runtime/globals.hpp
+index 4b32e370..09d05c6d 100644
+--- a/src/hotspot/share/runtime/globals.hpp
++++ b/src/hotspot/share/runtime/globals.hpp
+@@ -251,8 +251,8 @@ const int ObjectAlignmentInBytes = 8;
+           "Use large pages if maximum heap is at least this big")           \
+           range(0, max_uintx)                                               \
+                                                                             \
+-  product(bool, ForceTimeHighResolution, false,                             \
+-          "Using high time resolution (for Win32 only)")                    \
++  product(bool, ForceTimeHighResolution, true,                              \
++          "Using high time resolution (for Win32 only, J47: default-on)")   \
+                                                                             \
+   develop(bool, TracePcPatching, false,                                     \
+           "Trace usage of frame::patch_pc")                                 \

@@ -1,0 +1,29 @@
+diff --git a/src/hotspot/share/memory/allocation.hpp b/src/hotspot/share/memory/allocation.hpp
+--- a/src/hotspot/share/memory/allocation.hpp
++++ b/src/hotspot/share/memory/allocation.hpp
+@@ -445,7 +445,12 @@ class ResourceObj {
+   void* operator new [](size_t size, const std::nothrow_t& nothrow_constant) throw() = delete;
+ 
+-  void  operator delete(void* p) = delete;
+-  void  operator delete [](void* p) = delete;
++  // MSVC 19.44+ (VS2022 17.14) diagnoses C2280 for new-expressions with
++  // potentially-throwing ctors when only a deleted deallocation function
++  // is visible. These objects are never deleted (resource allocation
++  // failure is fatal, not an exception), so trap loudly if it happens.
++  // Cf. MetaspaceObj::operator delete in this file.
++  void  operator delete(void* p) { ShouldNotCallThis(); }
++  void  operator delete [](void* p) { ShouldNotCallThis(); }
+ };
+ 
+ class ArenaObj {
+@@ -457,7 +457,8 @@ class ArenaObj {
+   void* operator new [](size_t size, const std::nothrow_t& nothrow_constant) throw() = delete;
+ 
+-  void  operator delete(void* p) = delete;
+-  void  operator delete [](void* p) = delete;
++  // Same MSVC 19.44 C2280 rationale as ResourceObj above.
++  void  operator delete(void* p) { ShouldNotCallThis(); }
++  void  operator delete [](void* p) { ShouldNotCallThis(); }
+ };
+ 
+ //----------------------------------------------------------------------

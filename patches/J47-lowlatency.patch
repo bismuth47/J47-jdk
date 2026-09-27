@@ -1,0 +1,93 @@
+diff --git a/src/hotspot/os/windows/os_windows.cpp b/src/hotspot/os/windows/os_windows.cpp
+index 72a365fde..2d0fd4281 100644
+--- a/src/hotspot/os/windows/os_windows.cpp
++++ b/src/hotspot/os/windows/os_windows.cpp
+@@ -3297,6 +3297,9 @@ size_t os::win32::large_page_init_decide_size() {
+ 
+   if (!os::win32::request_lock_memory_privilege()) {
+     WARN("JVM cannot use large page memory because it does not have enough privilege to lock pages in memory.");
++    // J47: always log once even for ergonomic defaults (was silent when FLAG_IS_DEFAULT).
++    log_warning(gc)("J47: SeLockMemoryPrivilege missing ([Lock Pages in Memory] not granted). "
++                    "Large pages disabled, continuing with regular pages.");
+     return 0;
+   }
+ 
+@@ -3621,12 +3624,19 @@ char* os::pd_reserve_memory_special(size_t bytes, size_t alignment, size_t page_
+ 
+   if (!is_aligned(bytes, page_size)) {
+     // Fallback to small pages, Windows does not support mixed mappings.
++    // J47: warn on fallback (was silent nullptr).
++    log_warning(gc)("J47: Large pages reserve failed: size not aligned "
++                    "(bytes=" SIZE_FORMAT ", page=" SIZE_FORMAT "), falling back to regular pages.",
++                    bytes, page_size);
+     return nullptr;
+   }
+ 
+   // Ensure GetLargePageMinimum() returns a valid positive value
+   size_t large_page_min = GetLargePageMinimum();
+   if (large_page_min <= 0) {
++    // J47: warn when OS reports no large-page support.
++    log_warning(gc)("J47: Large pages unavailable (GetLargePageMinimum()=0). "
++                    "Grant [Lock Pages in Memory] or disable UseLargePages. Falling back.");
+     return nullptr;
+   }
+ 
+diff --git a/src/hotspot/share/gc/shared/gcConfig.cpp b/src/hotspot/share/gc/shared/gcConfig.cpp
+index 506b368d6..e55dd6821 100644
+--- a/src/hotspot/share/gc/shared/gcConfig.cpp
++++ b/src/hotspot/share/gc/shared/gcConfig.cpp
+@@ -97,7 +97,12 @@ void GCConfig::fail_if_non_included_gc_is_selected() {
+ 
+ void GCConfig::select_gc_ergonomically() {
+   if (os::is_server_class_machine()) {
+-#if INCLUDE_G1GC
++// J47: default to Generational ZGC (low-latency) instead of G1
++#if INCLUDE_ZGC
++    FLAG_SET_ERGO_IF_DEFAULT(UseZGC, true);
++    FLAG_SET_ERGO_IF_DEFAULT(ZGenerational, true);
++    FLAG_SET_ERGO_IF_DEFAULT(AlwaysPreTouch, true);
++#elif INCLUDE_G1GC
+     FLAG_SET_ERGO_IF_DEFAULT(UseG1GC, true);
+ #elif INCLUDE_PARALLELGC
+     FLAG_SET_ERGO_IF_DEFAULT(UseParallelGC, true);
+diff --git a/src/hotspot/share/gc/shared/gc_globals.hpp b/src/hotspot/share/gc/shared/gc_globals.hpp
+index 98cd6137e..13e6cbc38 100644
+--- a/src/hotspot/share/gc/shared/gc_globals.hpp
++++ b/src/hotspot/share/gc/shared/gc_globals.hpp
+@@ -125,8 +125,8 @@
+   product(bool, UseZGC, false,                                              \
+           "Use the Z garbage collector")                                    \
+                                                                             \
+-  product(bool, ZGenerational, false,                                       \
+-          "Use the generational version of ZGC")                            \
++  product(bool, ZGenerational, true,                                       \
++          "Use the generational version of ZGC (J47: default-on)")          \
+                                                                             \
+   product(bool, UseShenandoahGC, false,                                     \
+           "Use the Shenandoah garbage collector")                           \
+@@ -199,8 +199,8 @@
+           range(1, max_jint/3)                                              \
+                                                                             \
+                                                                             \
+-  product(bool, AlwaysPreTouch, false,                                      \
+-          "Force all freshly committed pages to be pre-touched")            \
++  product(bool, AlwaysPreTouch, true,                                       \
++          "Force all freshly committed pages to be pre-touched (J47: default-on)") \
+                                                                             \
+   product(bool, AlwaysPreTouchStacks, false, DIAGNOSTIC,                    \
+           "Force java thread stacks to be fully pre-touched")               \
+diff --git a/src/hotspot/share/runtime/globals.hpp b/src/hotspot/share/runtime/globals.hpp
+index d6c41bd5f..3280f3ba9 100644
+--- a/src/hotspot/share/runtime/globals.hpp
++++ b/src/hotspot/share/runtime/globals.hpp
+@@ -253,8 +253,8 @@ const int ObjectAlignmentInBytes = 8;
+           "Use large pages if maximum heap is at least this big")           \
+           range(0, max_uintx)                                               \
+                                                                             \
+-  product(bool, ForceTimeHighResolution, false,                             \
+-          "Using high time resolution (for Win32 only)")                    \
++  product(bool, ForceTimeHighResolution, true,                              \
++          "Using high time resolution (for Win32 only, J47: default-on)")   \
+                                                                             \
+   develop(bool, TracePcPatching, false,                                     \
+           "Trace usage of frame::patch_pc")                                 \
